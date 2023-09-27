@@ -31,7 +31,12 @@ async fn main() {
             .service(Files::new("/", "./web/dist").index_file("index.html"))
             .app_data(data.clone())
     })
-    .bind(("0.0.0.0", 9257))
+    .bind((
+        dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or("0.0.0.0".to_string()),
+        dotenvy::var("WEBCLIP_BIND_PORT")
+            .map(|port| port.parse::<u16>().expect("Invalid port"))
+            .unwrap_or(9257),
+    ))
     .unwrap()
     .run()
     .await
