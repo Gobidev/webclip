@@ -5,8 +5,9 @@ Webclip is a simple cross-device web-based clipboard written in
 
 ## How to Run
 
-- Install [`trunk`](https://trunkrs.dev/), [`npm`](https://www.npmjs.com/) and
-  [`cargo`](https://rustup.rs/)
+- Install [`trunk`](https://trunkrs.dev/), [`npm`](https://www.npmjs.com/),
+  [`cargo`](https://rustup.rs/) and
+  [binaryen](https://github.com/WebAssembly/binaryen).
 - Inside the `web` directory, run `trunk build --release`
 - Inside the root directory, run `cargo run --release`
 - The webserver will run on port `9257`
