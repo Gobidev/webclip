@@ -13,7 +13,10 @@ use actix_web::{
 use actix_web_actors::ws;
 use tokio::sync::Mutex;
 
-struct AppState(Arc<Mutex<String>>);
+struct AppState {
+    clipboard_content: Arc<Mutex<String>>,
+    connections: Arc<Mutex<Vec<Addr<ClipboardWebsocket>>>>,
+}
 
 const fn parse_int(s: &str) -> usize {
     let mut bytes = s.as_bytes();
@@ -39,6 +42,10 @@ struct ClipboardWebsocket {
     shared_data: web::Data<AppState>,
 }
 
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Message(pub String);
+
 impl ClipboardWebsocket {
     fn heartbeat(&self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
@@ -56,6 +63,33 @@ impl Actor for ClipboardWebsocket {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.heartbeat(ctx);
+        let connections = self.shared_data.connections.clone();
+        let addr = ctx.address().clone();
+        tokio::spawn(async move {
+            connections.lock().await.push(addr);
+        });
+    }
+
+    fn stopped(&mut self, ctx: &mut Self::Context) {
+        let connections = self.shared_data.connections.clone();
+        let addr = ctx.address().clone();
+        tokio::spawn(async move {
+            let index = connections
+                .lock()
+                .await
+                .iter()
+                .position(|a| *a == addr)
+                .unwrap();
+            connections.lock().await.remove(index);
+        });
+    }
+}
+
+impl Handler<Message> for ClipboardWebsocket {
+    type Result = ();
+
+    fn handle(&mut self, msg: Message, ctx: &mut Self::Context) -> Self::Result {
+        ctx.text(msg.0);
     }
 }
 
@@ -80,10 +114,13 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocke
                 ctx.stop();
             }
             ws::Message::Text(text) => {
-                let data = self.shared_data.0.clone();
-                // ctx.text(text.clone());
+                let data = self.shared_data.clipboard_content.clone();
+                let connections = self.shared_data.connections.clone();
                 tokio::spawn(async move {
                     *data.lock().await = text.to_string();
+                    for connection in connections.lock().await.iter() {
+                        connection.do_send(Message(text.to_string()));
+                    }
                 });
             }
             _ => (),
@@ -111,18 +148,24 @@ async fn update_clipboard(data: Data<AppState>, body: String) -> impl Responder 
     if body.len() > MAX_SIZE {
         return HttpResponse::BadRequest();
     }
-    *data.0.lock().await = body;
+    *data.clipboard_content.lock().await = body.clone();
+    for connection in data.connections.lock().await.iter() {
+        connection.do_send(Message(body.clone()));
+    }
     HttpResponse::Ok()
 }
 
 #[actix_web::get("/clipboard")]
 async fn get_clipboard(data: Data<AppState>) -> String {
-    data.0.lock().await.clone()
+    data.clipboard_content.lock().await.clone()
 }
 
 #[actix_web::main]
 async fn main() {
-    let clipboard_content = Data::new(AppState(Arc::new(Mutex::new(String::new()))));
+    let clipboard_content = Data::new(AppState {
+        clipboard_content: Arc::new(Mutex::new(String::new())),
+        connections: Arc::new(Mutex::new(Vec::new())),
+    });
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Compress::default())
