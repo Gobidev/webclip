@@ -44,7 +44,7 @@ script = []
 script = []
 
 [[web.proxy]]
-backend="http://localhost:9000/clipboard"
+backend="http://localhost:9257/clipboard"
 
 [application.plugins]
 
