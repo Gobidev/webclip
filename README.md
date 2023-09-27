@@ -15,13 +15,14 @@ Webclip is a simple cross-device web-based clipboard written in
 
 For both compilations, you can set this environment variable:
 
-- `WEBCLIP_MAX_SIZE` to specify the maximum allowed size for the clipboard
+- `WEBCLIP_MAX_SIZE` to specify the maximum allowed size for the clipboard,
+  default is 100,000 characters.
 
 You can configure the address and port during runtime with these environment
 variables:
 
-- `WEBCLIP_BIND_ADDRESS`: which address to bind to
-- `WEBCLIP_BIND_PORT`: which port to bind to
+- `WEBCLIP_BIND_ADDRESS`: which address to bind to, default is `0.0.0.0`.
+- `WEBCLIP_BIND_PORT`: which port to bind to, default is `9257`.
 
 ## Development
 
