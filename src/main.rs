@@ -4,6 +4,22 @@ use tokio::sync::Mutex;
 
 struct AppState(pub Mutex<String>);
 
+const fn parse_int(s: &str) -> usize {
+    let mut bytes = s.as_bytes();
+    let mut val = 0;
+    while let [byte, rest @ ..] = bytes {
+        assert!(b'0' <= *byte && *byte <= b'9', "invalid digit");
+        val = val * 10 + (*byte - b'0') as usize;
+        bytes = rest;
+    }
+    val
+}
+
+const MAX_SIZE: usize = match option_env!("WEBCLIP_MAX_SIZE") {
+    Some(size) => parse_int(size),
+    None => 100_000,
+};
+
 #[actix_web::main]
 async fn main() {
     let data = Data::new(AppState(Mutex::new(String::new())));
@@ -24,7 +40,7 @@ async fn main() {
 
 #[actix_web::post("/clipboard")]
 async fn update_clipboard(data: Data<AppState>, body: String) -> impl Responder {
-    if body.len() > 100_000 {
+    if body.len() > MAX_SIZE {
         return HttpResponse::BadRequest();
     }
     *data.0.lock().await = body;

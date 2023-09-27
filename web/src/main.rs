@@ -11,6 +11,27 @@ static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 static BACKEND_URL: Lazy<String> =
     Lazy::new(|| web_sys::window().unwrap().location().origin().unwrap());
 
+const fn parse_int(s: &str) -> usize {
+    let mut bytes = s.as_bytes();
+    let mut val = 0;
+    while let [byte, rest @ ..] = bytes {
+        assert!(b'0' <= *byte && *byte <= b'9', "invalid digit");
+        val = val * 10 + (*byte - b'0') as usize;
+        bytes = rest;
+    }
+    val
+}
+
+const MAX_SIZE: usize = match option_env!("WEBCLIP_MAX_SIZE") {
+    Some(size) => parse_int(size),
+    None => 100_000,
+};
+
+const GRUVBOX_BG: Color = from_u32(0x282828, 1.);
+const GRUVBOX_FG: Color = from_u32(0xebdbb2, 1.);
+const GRUVBOX_GREEN: Color = from_u32(0x98971a, 1.);
+const GRUVBOX_RED: Color = from_u32(0xfb4934, 1.);
+
 fn main() {
     dioxus_web::launch(App)
 }
@@ -65,12 +86,12 @@ fn App(cx: Scope) -> Element {
                 }}
 
                 html {{
-                    color-scheme: light dark;
+                    color-scheme: dark;
                 }}
             "
         }
         MatTheme{
-            theme: Colors{ primary: LIGHT_GREEN_500, error: RED_500, ..Colors::DEFAULT_DARK },
+            theme: Colors{ background: GRUVBOX_BG, on_surface: Some(GRUVBOX_FG), primary: GRUVBOX_GREEN, error: GRUVBOX_RED, ..Colors::DEFAULT_DARK },
             dark_theme: None,
         }
         if error.is_empty() {
@@ -80,7 +101,7 @@ fn App(cx: Scope) -> Element {
                     label: "Clipboard",
                     style: "width: 100%; height: calc(95svh - 2rem)",
                     outlined: true,
-                    max_length: 100_000,
+                    max_length: MAX_SIZE as u64,
                     disabled: !fetched,
                     char_counter: TextAreaCharCounter::External,
                     _oninput: {
