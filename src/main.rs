@@ -1,5 +1,5 @@
 use actix_files::Files;
-use actix_web::{web::Data, App, HttpResponse, HttpServer, Responder};
+use actix_web::{middleware, web::Data, App, HttpResponse, HttpServer, Responder};
 use tokio::sync::Mutex;
 
 struct AppState(pub Mutex<String>);
@@ -9,6 +9,7 @@ async fn main() {
     let data = Data::new(AppState(Mutex::new(String::new())));
     HttpServer::new(move || {
         App::new()
+            .wrap(middleware::Compress::default())
             .service(get_clipboard)
             .service(update_clipboard)
             .service(Files::new("/", "./web/dist").index_file("index.html"))
