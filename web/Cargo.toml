@@ -12,7 +12,3 @@ material-dioxus = { version = "0.0.3-dev", features = ["full"] }
 once_cell = "1.18.0"
 reqwest = "0.11.20"
 web-sys = { version = "0.3.64", features = ["Window", "Location"] }
-
-[profile.release]
-opt-level = "s"
-strip = true
