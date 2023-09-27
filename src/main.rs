@@ -1,8 +1,19 @@
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use actix::prelude::*;
 use actix_files::Files;
-use actix_web::{middleware, web::Data, App, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    middleware,
+    web::{self, Data},
+    App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+};
+use actix_web_actors::ws;
 use tokio::sync::Mutex;
 
-struct AppState(pub Mutex<String>);
+struct AppState(Arc<Mutex<String>>);
 
 const fn parse_int(s: &str) -> usize {
     let mut bytes = s.as_bytes();
@@ -20,27 +31,79 @@ const MAX_SIZE: usize = match option_env!("WEBCLIP_MAX_SIZE") {
     None => 100_000,
 };
 
-#[actix_web::main]
-async fn main() {
-    let data = Data::new(AppState(Mutex::new(String::new())));
-    HttpServer::new(move || {
-        App::new()
-            .wrap(middleware::Compress::default())
-            .service(get_clipboard)
-            .service(update_clipboard)
-            .service(Files::new("/", "./web/dist").index_file("index.html"))
-            .app_data(data.clone())
-    })
-    .bind((
-        dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or("0.0.0.0".to_string()),
-        dotenvy::var("WEBCLIP_BIND_PORT")
-            .map(|port| port.parse::<u16>().expect("Invalid port"))
-            .unwrap_or(9257),
-    ))
-    .unwrap()
-    .run()
-    .await
-    .unwrap();
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+
+struct ClipboardWebsocket {
+    heartbeat: Instant,
+    shared_data: web::Data<AppState>,
+}
+
+impl ClipboardWebsocket {
+    fn heartbeat(&self, ctx: &mut <Self as Actor>::Context) {
+        ctx.run_interval(HEARTBEAT_INTERVAL, |act, ctx| {
+            if Instant::now().duration_since(act.heartbeat) > CLIENT_TIMEOUT {
+                ctx.stop();
+                return;
+            }
+            ctx.ping(b"");
+        });
+    }
+}
+
+impl Actor for ClipboardWebsocket {
+    type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.heartbeat(ctx);
+    }
+}
+
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocket {
+    fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
+        let msg = match msg {
+            Err(_) => {
+                ctx.stop();
+                return;
+            }
+            Ok(msg) => msg,
+        };
+
+        match msg {
+            ws::Message::Ping(msg) => {
+                self.heartbeat = Instant::now();
+                ctx.pong(&msg);
+            }
+            ws::Message::Pong(_) => self.heartbeat = Instant::now(),
+            ws::Message::Close(reason) => {
+                ctx.close(reason);
+                ctx.stop();
+            }
+            ws::Message::Text(text) => {
+                let data = self.shared_data.0.clone();
+                // ctx.text(text.clone());
+                tokio::spawn(async move {
+                    *data.lock().await = text.to_string();
+                });
+            }
+            _ => (),
+        }
+    }
+}
+
+async fn ws_route(
+    req: HttpRequest,
+    stream: web::Payload,
+    clipboard_content: Data<AppState>,
+) -> Result<impl Responder, Error> {
+    ws::start(
+        ClipboardWebsocket {
+            heartbeat: Instant::now(),
+            shared_data: clipboard_content.clone(),
+        },
+        &req,
+        stream,
+    )
 }
 
 #[actix_web::post("/clipboard")]
@@ -55,4 +118,28 @@ async fn update_clipboard(data: Data<AppState>, body: String) -> impl Responder 
 #[actix_web::get("/clipboard")]
 async fn get_clipboard(data: Data<AppState>) -> String {
     data.0.lock().await.clone()
+}
+
+#[actix_web::main]
+async fn main() {
+    let clipboard_content = Data::new(AppState(Arc::new(Mutex::new(String::new()))));
+    HttpServer::new(move || {
+        App::new()
+            .wrap(middleware::Compress::default())
+            .service(get_clipboard)
+            .service(update_clipboard)
+            .service(web::resource("/ws").route(web::get().to(ws_route)))
+            .service(Files::new("/", "./web/dist").index_file("index.html"))
+            .app_data(clipboard_content.clone())
+    })
+    .bind((
+        dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or("0.0.0.0".to_string()),
+        dotenvy::var("WEBCLIP_BIND_PORT")
+            .map(|port| port.parse::<u16>().expect("Invalid port"))
+            .unwrap_or(9257),
+    ))
+    .unwrap()
+    .run()
+    .await
+    .unwrap();
 }
