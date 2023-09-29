@@ -1,5 +1,7 @@
 #![allow(non_snake_case)]
 use dioxus::prelude::*;
+use futures::{SinkExt, StreamExt};
+use gloo_net::websocket::{futures::WebSocket, Message};
 use material_dioxus::{
     palette::*,
     text_inputs::{MatTextArea, TextAreaCharCounter},
@@ -41,6 +43,28 @@ fn App(cx: Scope) -> Element {
     let fetched = use_state(cx, || false);
     let value = use_state(cx, String::new);
     let error = use_state(cx, String::new);
+    let dont_update = use_state(cx, || false);
+    let ws_connected = use_state(cx, || false);
+    let tx = use_coroutine(cx, |mut rx: UnboundedReceiver<String>| {
+        to_owned![value, ws_connected, dont_update];
+        async move {
+            let ws = match WebSocket::open(&(BACKEND_URL.replace("http", "ws") + "/ws")) {
+                Ok(w) => w,
+                Err(_) => return,
+            };
+            ws_connected.set(true);
+            let (mut write, mut read) = ws.split();
+            loop {
+                tokio::select! {
+                    Some(Ok(Message::Text(m))) = read.next() => {
+                        value.set(m);
+                        dont_update.set(true);
+                    },
+                    Some(m) = rx.next() => drop(write.send(Message::Text(m)).await),
+                };
+            }
+        }
+    });
     if !request_sent {
         cx.spawn({
             to_owned![value, fetched, error];
@@ -65,16 +89,20 @@ fn App(cx: Scope) -> Element {
             }
         });
     }
-    if **fetched {
-        to_owned![value];
-        cx.spawn(async move {
-            CLIENT
-                .post(format!("{}/clipboard", &*BACKEND_URL))
-                .body(value.get().clone())
-                .send()
-                .await
-                .unwrap();
-        });
+    if **fetched && !dont_update {
+        if **ws_connected {
+            tx.send(value.get().clone())
+        } else {
+            to_owned![value];
+            cx.spawn(async move {
+                CLIENT
+                    .post(format!("{}/clipboard", &*BACKEND_URL))
+                    .body(value.get().clone())
+                    .send()
+                    .await
+                    .unwrap();
+            });
+        }
     }
     render! {
         style {
@@ -105,9 +133,10 @@ fn App(cx: Scope) -> Element {
                     disabled: !fetched,
                     char_counter: TextAreaCharCounter::External,
                     _oninput: {
-                        to_owned![value];
+                        to_owned![value, dont_update];
                         move |new_value| {
                             value.set(new_value);
+                            dont_update.set(false);
                         }
                     }
                 }

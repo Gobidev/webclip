@@ -116,10 +116,13 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocke
             ws::Message::Text(text) => {
                 let data = self.shared_data.clipboard_content.clone();
                 let connections = self.shared_data.connections.clone();
+                let addr = ctx.address();
                 tokio::spawn(async move {
                     *data.lock().await = text.to_string();
                     for connection in connections.lock().await.iter() {
-                        connection.do_send(Message(text.to_string()));
+                        if connection != &addr {
+                            connection.do_send(Message(text.to_string()));
+                        }
                     }
                 });
             }
