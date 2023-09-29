@@ -9,7 +9,7 @@ Webclip is a simple cross-device web-based clipboard written in
   [`cargo`](https://rustup.rs/) and
   [binaryen](https://github.com/WebAssembly/binaryen).
 - Inside the `web` directory, run `trunk build --release`
-- Inside the root directory, run `cargo run --release`
+- Inside the root directory, run `cargo run --profile=backend`
 - The webserver will run on port `9257`
 
 ## Configuration

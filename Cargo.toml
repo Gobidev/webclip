@@ -16,4 +16,15 @@ dotenvy = "0.15.7"
 tokio = { version = "1.32.0", features = ["sync"] }
 
 [profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.backend]
+inherits = "release"
 strip = true
+opt-level = 3
+lto = false
+panic = 'unwind'
+codegen-units = 16
