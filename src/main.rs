@@ -11,6 +11,7 @@ use actix_web::{
     App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use actix_web_actors::ws;
+use log::info;
 use tokio::sync::Mutex;
 
 struct AppState {
@@ -68,6 +69,7 @@ impl Actor for ClipboardWebsocket {
         tokio::spawn(async move {
             connections.lock().await.push(addr);
         });
+        info!("Websocket connection started");
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
@@ -82,6 +84,7 @@ impl Actor for ClipboardWebsocket {
                 .unwrap();
             connections.lock().await.remove(index);
         });
+        info!("Websocket connection stopped");
     }
 }
 
@@ -163,8 +166,15 @@ async fn get_clipboard(data: Data<AppState>) -> String {
     data.clipboard_content.lock().await.clone()
 }
 
+const DEF_LOG_LEVEL: &str = "info";
+const ENV_LOG_LEVEL: &str = "RUST_LOG";
+
 #[actix_web::main]
 async fn main() {
+    if std::env::var(ENV_LOG_LEVEL).is_err() {
+        std::env::set_var(ENV_LOG_LEVEL, DEF_LOG_LEVEL);
+    }
+    pretty_env_logger::init();
     let clipboard_content = Data::new(AppState {
         clipboard_content: Arc::new(Mutex::new(String::new())),
         connections: Arc::new(Mutex::new(Vec::new())),
