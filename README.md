@@ -5,6 +5,14 @@ Webclip is a simple cross-device web-based clipboard written in
 
 ## How to Run
 
+### Docker
+
+```sh
+docker run -d -p 9257:9257 ghcr.io/gobidev/webclip:main
+```
+
+### Manually
+
 - Install [`trunk`](https://trunkrs.dev/), [`npm`](https://www.npmjs.com/),
   [`cargo`](https://rustup.rs/) and
   [binaryen](https://github.com/WebAssembly/binaryen).
