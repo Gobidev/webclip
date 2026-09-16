@@ -15,7 +15,13 @@
         <textarea id="clipboard" autocomplete="off" spellcheck="false" disabled></textarea>
         <label for="clipboard">Clipboard</label>
       </div>
-      <div class="counter" id="counter"></div>
+      <div class="toolbar">
+        <div class="actions">
+          <button class="button" id="copy" type="button" disabled>Copy</button>
+          <button class="button" id="clear" type="button" disabled>Clear</button>
+        </div>
+        <div class="counter" id="counter"></div>
+      </div>
     </div>
     <div class="status" id="status" hidden>Reconnecting</div>
   </body>
