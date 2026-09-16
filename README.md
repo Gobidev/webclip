@@ -61,6 +61,15 @@ docker run -d -p 9257:9257 \
   ghcr.io/gobidev/webclip:main
 ```
 
+## Logging
+
+Logging verbosity is controlled by `RUST_LOG` (default `info`). At the default
+level the server logs every WebSocket connect/disconnect with the client IP and
+User-Agent, plus a periodic status line (every 60s, when there are clients or
+clipboard content) summarizing connected clients and how full the clipboard is.
+Individual clipboard updates are logged at `debug`, so use `RUST_LOG=debug` to
+see every change.
+
 ## Development
 
 Run `cargo run --profile=backend` in the root directory. The frontend lives in

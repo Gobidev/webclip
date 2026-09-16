@@ -8,11 +8,12 @@ use actix_files::Files;
 use actix_web::{
     http::header,
     middleware,
+    rt,
     web::{self, Data},
     App, Error, HttpRequest, HttpResponse, HttpServer,
 };
 use actix_web_actors::ws;
-use log::info;
+use log::{debug, info};
 
 struct AppState {
     clipboard: Mutex<String>,
@@ -37,10 +38,13 @@ const MAX_SIZE: usize = match option_env!("WEBCLIP_MAX_SIZE") {
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+const STATUS_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
 struct ClipboardWebsocket {
     heartbeat: Instant,
     state: Data<AppState>,
+    ip: String,
+    user_agent: String,
 }
 
 #[derive(Message)]
@@ -66,14 +70,23 @@ impl Actor for ClipboardWebsocket {
         self.heartbeat(ctx);
         let mut connections = self.state.connections.lock().unwrap();
         connections.push(ctx.address());
+        let clients = connections.len();
         ctx.text(self.state.clipboard.lock().unwrap().clone());
-        info!("Websocket connection started");
+        info!(
+            "clipboard: websocket connected (ip={}, user-agent=\"{}\", clients={})",
+            self.ip, self.user_agent, clients
+        );
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
         let addr = ctx.address();
-        self.state.connections.lock().unwrap().retain(|a| *a != addr);
-        info!("Websocket connection stopped");
+        let mut connections = self.state.connections.lock().unwrap();
+        connections.retain(|a| *a != addr);
+        let clients = connections.len();
+        info!(
+            "clipboard: websocket disconnected (ip={}, clients={})",
+            self.ip, clients
+        );
     }
 }
 
@@ -114,6 +127,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocke
                         connection.do_send(Message(text.clone()));
                     }
                 }
+                debug!(
+                    "clipboard: updated via websocket (ip={}, bytes={})",
+                    self.ip,
+                    text.len()
+                );
             }
             _ => (),
         }
@@ -130,6 +148,31 @@ fn same_origin(req: &HttpRequest) -> bool {
     matches!(origin.split("://").nth(1), Some(host) if host == req.connection_info().host())
 }
 
+fn client_ip(req: &HttpRequest) -> String {
+    req.connection_info()
+        .realip_remote_addr()
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
+fn user_agent(req: &HttpRequest) -> String {
+    req.headers()
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
+fn log_status(state: &AppState) {
+    let clients = state.connections.lock().unwrap().len();
+    let chars = state.clipboard.lock().unwrap().chars().count();
+    if clients == 0 && chars == 0 {
+        return;
+    }
+    let percent = chars as f64 / MAX_SIZE as f64 * 100.0;
+    info!("clipboard: status (clients={clients}, filled={chars}/{MAX_SIZE} chars, {percent:.2}%)");
+}
+
 async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
@@ -142,6 +185,8 @@ async fn ws_route(
         ClipboardWebsocket {
             heartbeat: Instant::now(),
             state,
+            ip: client_ip(&req),
+            user_agent: user_agent(&req),
         },
         &req,
         stream,
@@ -160,6 +205,11 @@ async fn update_clipboard(req: HttpRequest, data: Data<AppState>, body: String) 
     for connection in data.connections.lock().unwrap().iter() {
         connection.do_send(Message(body.clone()));
     }
+    debug!(
+        "clipboard: updated via http (ip={}, bytes={})",
+        client_ip(&req),
+        body.len()
+    );
     HttpResponse::Ok().finish()
 }
 
@@ -215,6 +265,15 @@ async fn main() {
     let state = Data::new(AppState {
         clipboard: Mutex::new(String::new()),
         connections: Mutex::new(Vec::new()),
+    });
+    rt::spawn({
+        let state = state.clone();
+        async move {
+            loop {
+                rt::time::sleep(STATUS_LOG_INTERVAL).await;
+                log_status(&state);
+            }
+        }
     });
     let address = dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string());
     let port = dotenvy::var("WEBCLIP_BIND_PORT")
