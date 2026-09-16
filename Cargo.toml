@@ -15,7 +15,6 @@ actix-web-actors = "4.2.0"
 dotenvy = "0.15.7"
 log = "0.4.20"
 pretty_env_logger = "0.5.0"
-tokio = { version = "1.32.0", features = ["sync"] }
 
 [profile.release]
 opt-level = "z"

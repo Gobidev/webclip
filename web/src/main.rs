@@ -1,17 +1,16 @@
 #![allow(non_snake_case)]
 use dioxus::prelude::*;
-use futures::{SinkExt, StreamExt};
+use futures::{
+    future::{select, Either},
+    SinkExt, StreamExt,
+};
 use gloo_net::websocket::{futures::WebSocket, Message};
+use gloo_timers::future::TimeoutFuture;
 use material_dioxus::{
     palette::*,
     text_inputs::{MatTextArea, TextAreaCharCounter},
     theming::{Colors, MatTheme},
 };
-use once_cell::sync::Lazy;
-
-static CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
-static BACKEND_URL: Lazy<String> =
-    Lazy::new(|| web_sys::window().unwrap().location().origin().unwrap());
 
 const fn parse_int(s: &str) -> usize {
     let mut bytes = s.as_bytes();
@@ -38,72 +37,50 @@ fn main() {
     dioxus_web::launch(App)
 }
 
+fn ws_url() -> String {
+    let location = web_sys::window().unwrap().location();
+    let scheme = if location.protocol().unwrap() == "https:" {
+        "wss"
+    } else {
+        "ws"
+    };
+    format!("{}://{}/ws", scheme, location.host().unwrap())
+}
+
 fn App(cx: Scope) -> Element {
-    let request_sent = use_state(cx, || false);
-    let fetched = use_state(cx, || false);
     let value = use_state(cx, String::new);
-    let error = use_state(cx, String::new);
-    let dont_update = use_state(cx, || false);
-    let ws_connected = use_state(cx, || false);
+    let connected = use_state(cx, || false);
     let tx = use_coroutine(cx, |mut rx: UnboundedReceiver<String>| {
-        to_owned![value, ws_connected, dont_update];
+        to_owned![value, connected];
         async move {
-            let ws = match WebSocket::open(&(BACKEND_URL.replace("http", "ws") + "/ws")) {
-                Ok(w) => w,
-                Err(_) => return,
-            };
-            ws_connected.set(true);
-            let (mut write, mut read) = ws.split();
-            loop {
-                tokio::select! {
-                    Some(Ok(Message::Text(m))) = read.next() => {
-                        value.set(m);
-                        dont_update.set(true);
-                    },
-                    Some(m) = rx.next() => drop(write.send(Message::Text(m)).await),
-                };
+            'reconnect: loop {
+                match WebSocket::open(&ws_url()) {
+                    Ok(ws) => {
+                        connected.set(true);
+                        let (mut write, mut read) = ws.split();
+                        loop {
+                            match select(read.next(), rx.next()).await {
+                                Either::Left((msg, _)) => match msg {
+                                    Some(Ok(Message::Text(text))) => value.set(text),
+                                    Some(Ok(_)) => {}
+                                    _ => break,
+                                },
+                                Either::Right((Some(text), _)) => {
+                                    if write.send(Message::Text(text)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                Either::Right((None, _)) => break 'reconnect,
+                            }
+                        }
+                        connected.set(false);
+                    }
+                    Err(_) => connected.set(false),
+                }
+                TimeoutFuture::new(1_000).await;
             }
         }
     });
-    if !request_sent {
-        cx.spawn({
-            to_owned![value, fetched, error];
-            request_sent.set(true);
-            async move {
-                match CLIENT
-                    .get(format!("{}/clipboard", &*BACKEND_URL))
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        let status = response.status();
-                        match response.text().await {
-                            Ok(text) if status.is_success() => value.set(text),
-                            Ok(text) => error.set(text),
-                            Err(err) => error.set(err.to_string()),
-                        }
-                    }
-                    Err(err) => error.set(err.to_string()),
-                }
-                fetched.set(true);
-            }
-        });
-    }
-    if **fetched && !dont_update {
-        if **ws_connected {
-            tx.send(value.get().clone())
-        } else {
-            to_owned![value];
-            cx.spawn(async move {
-                CLIENT
-                    .post(format!("{}/clipboard", &*BACKEND_URL))
-                    .body(value.get().clone())
-                    .send()
-                    .await
-                    .unwrap();
-            });
-        }
-    }
     render! {
         style {
             dangerous_inner_html: "
@@ -122,30 +99,27 @@ fn App(cx: Scope) -> Element {
             theme: Colors{ background: GRUVBOX_BG, on_surface: Some(GRUVBOX_FG), primary: GRUVBOX_GREEN, error: GRUVBOX_RED, ..Colors::DEFAULT_DARK },
             dark_theme: None,
         }
-        if error.is_empty() {
-            rsx! {
-                MatTextArea{
-                    value: "{value}",
-                    label: "Clipboard",
-                    style: "width: 100%; height: calc(95svh - 2rem)",
-                    outlined: true,
-                    max_length: MAX_SIZE as u64,
-                    disabled: !fetched,
-                    char_counter: TextAreaCharCounter::External,
-                    _oninput: {
-                        to_owned![value, dont_update];
-                        move |new_value| {
-                            value.set(new_value);
-                            dont_update.set(false);
-                        }
-                    }
+        MatTextArea{
+            value: "{value}",
+            label: "Clipboard",
+            style: "width: 100%; height: calc(95svh - 2rem)",
+            outlined: true,
+            max_length: MAX_SIZE as u64,
+            disabled: !connected,
+            char_counter: TextAreaCharCounter::External,
+            _oninput: {
+                to_owned![value, tx];
+                move |new_value: String| {
+                    tx.send(new_value.clone());
+                    value.set(new_value);
                 }
             }
-        } else {
+        }
+        if !connected {
             rsx! {
                 div {
                     color: "var(--mdc-theme-error)",
-                    "{error}"
+                    "Reconnecting"
                 }
             }
         }

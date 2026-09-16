@@ -1,22 +1,22 @@
 use std::{
-    sync::Arc,
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
 use actix::prelude::*;
 use actix_files::Files;
 use actix_web::{
+    http::header,
     middleware,
     web::{self, Data},
-    App, Error, HttpRequest, HttpResponse, HttpServer, Responder,
+    App, Error, HttpRequest, HttpResponse, HttpServer,
 };
 use actix_web_actors::ws;
 use log::info;
-use tokio::sync::Mutex;
 
 struct AppState {
-    clipboard_content: Arc<Mutex<String>>,
-    connections: Arc<Mutex<Vec<Addr<ClipboardWebsocket>>>>,
+    clipboard: Mutex<String>,
+    connections: Mutex<Vec<Addr<ClipboardWebsocket>>>,
 }
 
 const fn parse_int(s: &str) -> usize {
@@ -40,7 +40,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct ClipboardWebsocket {
     heartbeat: Instant,
-    shared_data: web::Data<AppState>,
+    state: Data<AppState>,
 }
 
 #[derive(Message)]
@@ -64,26 +64,15 @@ impl Actor for ClipboardWebsocket {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.heartbeat(ctx);
-        let connections = self.shared_data.connections.clone();
-        let addr = ctx.address().clone();
-        tokio::spawn(async move {
-            connections.lock().await.push(addr);
-        });
+        let mut connections = self.state.connections.lock().unwrap();
+        connections.push(ctx.address());
+        ctx.text(self.state.clipboard.lock().unwrap().clone());
         info!("Websocket connection started");
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
-        let connections = self.shared_data.connections.clone();
-        let addr = ctx.address().clone();
-        tokio::spawn(async move {
-            let index = connections
-                .lock()
-                .await
-                .iter()
-                .position(|a| *a == addr)
-                .unwrap();
-            connections.lock().await.remove(index);
-        });
+        let addr = ctx.address();
+        self.state.connections.lock().unwrap().retain(|a| *a != addr);
         info!("Websocket connection stopped");
     }
 }
@@ -117,32 +106,42 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocke
                 ctx.stop();
             }
             ws::Message::Text(text) => {
-                let data = self.shared_data.clipboard_content.clone();
-                let connections = self.shared_data.connections.clone();
-                let addr = ctx.address();
-                tokio::spawn(async move {
-                    *data.lock().await = text.to_string();
-                    for connection in connections.lock().await.iter() {
-                        if connection != &addr {
-                            connection.do_send(Message(text.to_string()));
-                        }
+                let text = text.to_string();
+                *self.state.clipboard.lock().unwrap() = text.clone();
+                let sender = ctx.address();
+                for connection in self.state.connections.lock().unwrap().iter() {
+                    if *connection != sender {
+                        connection.do_send(Message(text.clone()));
                     }
-                });
+                }
             }
             _ => (),
         }
     }
 }
 
+fn same_origin(req: &HttpRequest) -> bool {
+    let Some(origin) = req.headers().get(header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    matches!(origin.split("://").nth(1), Some(host) if host == req.connection_info().host())
+}
+
 async fn ws_route(
     req: HttpRequest,
     stream: web::Payload,
-    clipboard_content: Data<AppState>,
-) -> Result<impl Responder, Error> {
+    state: Data<AppState>,
+) -> Result<HttpResponse, Error> {
+    if !same_origin(&req) {
+        return Ok(HttpResponse::Forbidden().finish());
+    }
     ws::start(
         ClipboardWebsocket {
             heartbeat: Instant::now(),
-            shared_data: clipboard_content.clone(),
+            state,
         },
         &req,
         stream,
@@ -150,20 +149,23 @@ async fn ws_route(
 }
 
 #[actix_web::post("/clipboard")]
-async fn update_clipboard(data: Data<AppState>, body: String) -> impl Responder {
-    if body.len() > MAX_SIZE {
-        return HttpResponse::BadRequest();
+async fn update_clipboard(req: HttpRequest, data: Data<AppState>, body: String) -> HttpResponse {
+    if !same_origin(&req) {
+        return HttpResponse::Forbidden().finish();
     }
-    *data.clipboard_content.lock().await = body.clone();
-    for connection in data.connections.lock().await.iter() {
+    if body.chars().count() > MAX_SIZE {
+        return HttpResponse::BadRequest().finish();
+    }
+    *data.clipboard.lock().unwrap() = body.clone();
+    for connection in data.connections.lock().unwrap().iter() {
         connection.do_send(Message(body.clone()));
     }
-    HttpResponse::Ok()
+    HttpResponse::Ok().finish()
 }
 
 #[actix_web::get("/clipboard")]
 async fn get_clipboard(data: Data<AppState>) -> String {
-    data.clipboard_content.lock().await.clone()
+    data.clipboard.lock().unwrap().clone()
 }
 
 const DEF_LOG_LEVEL: &str = "info";
@@ -175,25 +177,25 @@ async fn main() {
         std::env::set_var(ENV_LOG_LEVEL, DEF_LOG_LEVEL);
     }
     pretty_env_logger::init();
-    let clipboard_content = Data::new(AppState {
-        clipboard_content: Arc::new(Mutex::new(String::new())),
-        connections: Arc::new(Mutex::new(Vec::new())),
+    let state = Data::new(AppState {
+        clipboard: Mutex::new(String::new()),
+        connections: Mutex::new(Vec::new()),
     });
+    let address = dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = dotenvy::var("WEBCLIP_BIND_PORT")
+        .map(|port| port.parse::<u16>().expect("Invalid port"))
+        .unwrap_or(9257);
     HttpServer::new(move || {
         App::new()
             .wrap(middleware::Compress::default())
+            .app_data(web::PayloadConfig::new(MAX_SIZE.saturating_mul(4)))
+            .app_data(state.clone())
             .service(get_clipboard)
             .service(update_clipboard)
             .service(web::resource("/ws").route(web::get().to(ws_route)))
             .service(Files::new("/", "./web/dist").index_file("index.html"))
-            .app_data(clipboard_content.clone())
     })
-    .bind((
-        dotenvy::var("WEBCLIP_BIND_ADDRESS").unwrap_or("0.0.0.0".to_string()),
-        dotenvy::var("WEBCLIP_BIND_PORT")
-            .map(|port| port.parse::<u16>().expect("Invalid port"))
-            .unwrap_or(9257),
-    ))
+    .bind((address, port))
     .unwrap()
     .run()
     .await
