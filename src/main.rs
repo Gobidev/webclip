@@ -168,11 +168,46 @@ async fn get_clipboard(data: Data<AppState>) -> String {
     data.clipboard.lock().unwrap().clone()
 }
 
+#[actix_web::get("/config.js")]
+async fn config_js() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("application/javascript")
+        .insert_header(("Cache-Control", "no-cache"))
+        .body(format!("window.WEBCLIP_MAX_SIZE = {MAX_SIZE};\n"))
+}
+
+fn color_env(name: &str, default: &str) -> String {
+    dotenvy::var(name)
+        .ok()
+        .filter(|color| {
+            !color.is_empty()
+                && color
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "#(),.% -/".contains(c))
+        })
+        .unwrap_or_else(|| default.to_string())
+}
+
+#[actix_web::get("/theme.css")]
+async fn theme_css() -> HttpResponse {
+    let primary = color_env("WEBCLIP_COLOR_PRIMARY", "#98971a");
+    let background = color_env("WEBCLIP_COLOR_BACKGROUND", "#282828");
+    let error = color_env("WEBCLIP_COLOR_ERROR", "#fb4934");
+    let foreground = color_env("WEBCLIP_COLOR_FOREGROUND", "#ebdbb2");
+    HttpResponse::Ok()
+        .content_type("text/css")
+        .insert_header(("Cache-Control", "no-cache"))
+        .body(format!(
+            ":root {{\n  --mdc-theme-primary: {primary};\n  --mdc-theme-background: {background};\n  --mdc-theme-error: {error};\n  --mdc-theme-on-surface: {foreground};\n}}\n"
+        ))
+}
+
 const DEF_LOG_LEVEL: &str = "info";
 const ENV_LOG_LEVEL: &str = "RUST_LOG";
 
 #[actix_web::main]
 async fn main() {
+    dotenvy::dotenv().ok();
     if std::env::var(ENV_LOG_LEVEL).is_err() {
         std::env::set_var(ENV_LOG_LEVEL, DEF_LOG_LEVEL);
     }
@@ -192,8 +227,10 @@ async fn main() {
             .app_data(state.clone())
             .service(get_clipboard)
             .service(update_clipboard)
+            .service(config_js)
+            .service(theme_css)
             .service(web::resource("/ws").route(web::get().to(ws_route)))
-            .service(Files::new("/", "./web/dist").index_file("index.html"))
+            .service(Files::new("/", "./web/static").index_file("index.html"))
     })
     .bind((address, port))
     .unwrap()

@@ -1,6 +1,4 @@
 /target
-/web/dist
-/web/node_modules
 .git
 .gitignore
 Dockerfile

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Webclip | Simple Cross-Device Clipboard</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="theme.css" />
+    <script src="config.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="field disabled" id="field">
+      <div class="box" id="box">
+        <textarea id="clipboard" autocomplete="off" spellcheck="false" disabled></textarea>
+        <label for="clipboard">Clipboard</label>
+      </div>
+      <div class="counter" id="counter"></div>
+    </div>
+    <div class="status" id="status" hidden>Reconnecting</div>
+  </body>
+</html>
