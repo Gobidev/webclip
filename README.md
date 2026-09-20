@@ -24,6 +24,10 @@ docker run -d -p 9257:9257 ghcr.io/gobidev/webclip:main
 characters). It is read at compile time (default `100000`) and is also
 exposed to the frontend through `/config.js`.
 
+The clipboard also clears itself after 12 hours without any changes. This
+lifetime is currently fixed and is checked once a minute; when it expires the
+content is emptied for all connected clients.
+
 You can configure the address and port during runtime with these environment
 variables:
 

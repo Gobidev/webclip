@@ -15,8 +15,13 @@ use actix_web::{
 use actix_web_actors::ws;
 use log::{debug, info};
 
+struct Clipboard {
+    value: String,
+    last_change: Instant,
+}
+
 struct AppState {
-    clipboard: Mutex<String>,
+    clipboard: Mutex<Clipboard>,
     connections: Mutex<Vec<Addr<ClipboardWebsocket>>>,
 }
 
@@ -39,6 +44,8 @@ const MAX_SIZE: usize = match option_env!("WEBCLIP_MAX_SIZE") {
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 const STATUS_LOG_INTERVAL: Duration = Duration::from_secs(60);
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
+const CLIPBOARD_TTL: Duration = Duration::from_secs(12 * 60 * 60);
 
 struct ClipboardWebsocket {
     heartbeat: Instant,
@@ -71,7 +78,7 @@ impl Actor for ClipboardWebsocket {
         let mut connections = self.state.connections.lock().unwrap();
         connections.push(ctx.address());
         let clients = connections.len();
-        ctx.text(self.state.clipboard.lock().unwrap().clone());
+        ctx.text(self.state.clipboard.lock().unwrap().value.clone());
         info!(
             "clipboard: websocket connected (ip={}, user-agent=\"{}\", clients={})",
             self.ip, self.user_agent, clients
@@ -120,7 +127,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ClipboardWebsocke
             }
             ws::Message::Text(text) => {
                 let text = text.to_string();
-                *self.state.clipboard.lock().unwrap() = text.clone();
+                {
+                    let mut clipboard = self.state.clipboard.lock().unwrap();
+                    clipboard.value = text.clone();
+                    clipboard.last_change = Instant::now();
+                }
                 let sender = ctx.address();
                 for connection in self.state.connections.lock().unwrap().iter() {
                     if *connection != sender {
@@ -165,12 +176,28 @@ fn user_agent(req: &HttpRequest) -> String {
 
 fn log_status(state: &AppState) {
     let clients = state.connections.lock().unwrap().len();
-    let chars = state.clipboard.lock().unwrap().chars().count();
+    let chars = state.clipboard.lock().unwrap().value.chars().count();
     if clients == 0 && chars == 0 {
         return;
     }
     let percent = chars as f64 / MAX_SIZE as f64 * 100.0;
     info!("clipboard: status (clients={clients}, filled={chars}/{MAX_SIZE} chars, {percent:.2}%)");
+}
+
+fn clear_if_stale(state: &AppState) -> bool {
+    let stale = {
+        let mut clipboard = state.clipboard.lock().unwrap();
+        if clipboard.value.is_empty() || clipboard.last_change.elapsed() < CLIPBOARD_TTL {
+            return false;
+        }
+        clipboard.value.clear();
+        clipboard.last_change = Instant::now();
+        true
+    };
+    for connection in state.connections.lock().unwrap().iter() {
+        connection.do_send(Message(String::new()));
+    }
+    stale
 }
 
 async fn ws_route(
@@ -201,7 +228,10 @@ async fn update_clipboard(req: HttpRequest, data: Data<AppState>, body: String) 
     if body.chars().count() > MAX_SIZE {
         return HttpResponse::BadRequest().finish();
     }
-    *data.clipboard.lock().unwrap() = body.clone();
+    *data.clipboard.lock().unwrap() = Clipboard {
+        value: body.clone(),
+        last_change: Instant::now(),
+    };
     for connection in data.connections.lock().unwrap().iter() {
         connection.do_send(Message(body.clone()));
     }
@@ -215,7 +245,7 @@ async fn update_clipboard(req: HttpRequest, data: Data<AppState>, body: String) 
 
 #[actix_web::get("/clipboard")]
 async fn get_clipboard(data: Data<AppState>) -> String {
-    data.clipboard.lock().unwrap().clone()
+    data.clipboard.lock().unwrap().value.clone()
 }
 
 #[actix_web::get("/config.js")]
@@ -263,7 +293,10 @@ async fn main() {
     }
     pretty_env_logger::init();
     let state = Data::new(AppState {
-        clipboard: Mutex::new(String::new()),
+        clipboard: Mutex::new(Clipboard {
+            value: String::new(),
+            last_change: Instant::now(),
+        }),
         connections: Mutex::new(Vec::new()),
     });
     rt::spawn({
@@ -272,6 +305,20 @@ async fn main() {
             loop {
                 rt::time::sleep(STATUS_LOG_INTERVAL).await;
                 log_status(&state);
+            }
+        }
+    });
+    rt::spawn({
+        let state = state.clone();
+        async move {
+            loop {
+                rt::time::sleep(CLEANUP_INTERVAL).await;
+                if clear_if_stale(&state) {
+                    info!(
+                        "clipboard: cleared after {}h without changes",
+                        CLIPBOARD_TTL.as_secs() / 3600
+                    );
+                }
             }
         }
     });
