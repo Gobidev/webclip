@@ -10,19 +10,59 @@
     <script src="app.js" defer></script>
   </head>
   <body>
-    <div class="field disabled" id="field">
-      <div class="box" id="box">
-        <textarea id="clipboard" autocomplete="off" spellcheck="false" disabled></textarea>
-        <label for="clipboard">Clipboard</label>
-      </div>
-      <div class="toolbar">
-        <div class="actions">
-          <button class="button" id="copy" type="button" disabled>Copy</button>
-          <button class="button" id="clear" type="button" disabled>Clear</button>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" id="tab-shared" role="tab" aria-selected="true" aria-controls="panel-shared" type="button">Shared</button>
+      <button class="tab" id="tab-private" role="tab" aria-selected="false" aria-controls="panel-private" type="button">Private</button>
+    </nav>
+
+    <section class="panel" id="panel-shared" role="tabpanel" aria-labelledby="tab-shared">
+      <div class="field disabled" id="field">
+        <div class="box" id="box">
+          <textarea id="clipboard" autocomplete="off" spellcheck="false" disabled></textarea>
+          <label for="clipboard">Clipboard</label>
         </div>
-        <div class="counter" id="counter"></div>
+        <div class="toolbar">
+          <div class="actions">
+            <button class="button" id="copy" type="button" disabled>Copy</button>
+            <button class="button" id="clear" type="button" disabled>Clear</button>
+          </div>
+          <div class="counter" id="counter"></div>
+        </div>
       </div>
-    </div>
-    <div class="status" id="status" hidden>Reconnecting</div>
+      <div class="status error" id="status" hidden>Reconnecting</div>
+    </section>
+
+    <section class="panel" id="panel-private" role="tabpanel" aria-labelledby="tab-private" hidden>
+      <div class="field start" id="private-start">
+        <div class="box">
+          <input id="private-pin-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" spellcheck="false" />
+          <label for="private-pin-input">PIN</label>
+        </div>
+        <div class="toolbar">
+          <div class="actions">
+            <button class="button" id="private-join" type="button" disabled>Join</button>
+            <button class="button" id="private-create" type="button">Create</button>
+          </div>
+        </div>
+        <div class="meta">Create a private clipboard and share the PIN, or join with one.</div>
+        <div class="status" id="private-start-status" hidden></div>
+      </div>
+
+      <div class="field" id="private-room" hidden>
+        <div class="box" id="private-room-box">
+          <textarea id="private-room-text" autocomplete="off" spellcheck="false" disabled></textarea>
+          <label for="private-room-text">Private clipboard</label>
+        </div>
+        <div class="toolbar">
+          <div class="actions">
+            <button class="button" id="private-room-copy" type="button" disabled>Copy</button>
+            <button class="button" id="private-room-clear" type="button" disabled>Clear</button>
+            <button class="button" id="private-room-leave" type="button">Leave</button>
+          </div>
+          <button class="pin-button" id="private-room-pin" type="button" title="Copy PIN"></button>
+        </div>
+        <div class="status" id="private-room-status" hidden>Reconnecting</div>
+      </div>
+    </section>
   </body>
 </html>

@@ -136,14 +136,67 @@ html {
 
 body {
   background-color: var(--mdc-theme-background);
-  margin: 1rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  min-height: 100svh;
+  padding: 1rem;
   font-family: Roboto, sans-serif;
+}
+
+.tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--text-field-idle-border);
+}
+
+.tab {
+  appearance: none;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--mdc-theme-text-secondary-on-background);
+  font: 500 14px/20px Roboto, sans-serif;
+  letter-spacing: 0.0892857143em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--text-field-ink);
+}
+
+.tab:focus-visible {
+  outline: none;
+  border-bottom-color: var(--mdc-theme-primary);
+}
+
+.tab.active {
+  color: var(--mdc-theme-primary);
+  border-bottom-color: var(--mdc-theme-primary);
+}
+
+.panel {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.panel[hidden] {
+  display: none;
 }
 
 .field {
   display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
   flex-direction: column;
-  height: calc(95svh - 2rem);
 }
 
 .box {
@@ -165,7 +218,8 @@ body {
   box-shadow: inset 0 0 0 1px var(--mdc-theme-primary);
 }
 
-.box > textarea {
+.box > textarea,
+.box > input {
   flex: 1 1 auto;
   width: 100%;
   box-sizing: border-box;
@@ -214,6 +268,7 @@ body {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -265,7 +320,59 @@ body {
 }
 
 .status {
+  color: var(--mdc-theme-text-secondary-on-background);
+  font: 400 12px/20px Roboto, sans-serif;
+  letter-spacing: 0.0333333333em;
+}
+
+.status.error {
   color: var(--mdc-theme-error);
+}
+
+.field[hidden] {
+  display: none;
+}
+
+.start {
+  align-self: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 420px;
+}
+
+.start > .box {
+  flex: 0 0 auto;
+}
+
+.start > .toolbar {
+  justify-content: center;
+}
+
+.start > .meta {
+  text-align: center;
+}
+
+.pin-button {
+  appearance: none;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--mdc-theme-primary);
+  font: 500 12px/20px Roboto, sans-serif;
+  letter-spacing: 0.0892857143em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pin-button:hover {
+  text-decoration: underline;
+}
+
+.meta {
+  color: var(--mdc-theme-text-secondary-on-background);
+  font: 400 12px/20px Roboto, sans-serif;
+  letter-spacing: 0.0333333333em;
 }
 
 .field.disabled > .box {
