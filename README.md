@@ -1,7 +1,9 @@
 # Webclip
 
 Webclip is a simple cross-device web-based clipboard written in
-[Actix](https://actix.rs/) with a dependency-free JavaScript frontend.
+[Actix](https://actix.rs/) with a dependency-free JavaScript frontend. Next to
+the shared clipboard it offers private clipboards: the same clipboard shared
+only with the peers that know its PIN, deleted after inactivity.
 
 ## How to Run
 
@@ -52,6 +54,7 @@ begins a comment in `.env` files:
 WEBCLIP_COLOR_BACKGROUND="#282828"
 WEBCLIP_COLOR_PRIMARY="#98971a"
 WEBCLIP_BIND_PORT=9257
+WEBCLIP_PRIVATE_TTL=1800
 ```
 
 For example:
@@ -65,14 +68,44 @@ docker run -d -p 9257:9257 \
   ghcr.io/gobidev/webclip:main
 ```
 
+## Private Clipboards
+
+The "Private" tab opens a clipboard that is shared only with the peers who know
+its PIN. Press `Create` to get a generated PIN (4 digits by default) and enter
+the room; other devices enter that PIN and press `Join`. Once connected, the
+private clipboard behaves exactly like the shared one: every peer sees changes
+live and can copy, clear or leave the room. The PIN is shown next to `Leave`
+and can be copied with a click, so more peers can join later.
+
+Rooms are held in memory only and are deleted once nobody is connected and
+nothing has changed for 30 minutes. Neither their contents nor their PINs are
+written to the logs. Like the shared clipboard they are only as private as the
+server they run on: contents are stored in plain text and the PIN is sent to
+the server, so use HTTPS or a trusted network. Failed joins are rate limited
+per client IP, and a longer PIN makes guessing harder. The following variables
+can be set at runtime (or in `.env`):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `WEBCLIP_PRIVATE_ENABLED` | `true` | Set to `false` to hide the tab and disable the endpoints |
+| `WEBCLIP_PRIVATE_TTL` | `1800` | Seconds of inactivity before an empty room is deleted (minimum 30) |
+| `WEBCLIP_PRIVATE_PIN_LENGTH` | `4` | Number of PIN digits (between 3 and 12) |
+| `WEBCLIP_PRIVATE_MAX_ROOMS` | `100` | Maximum number of rooms kept in memory |
+| `WEBCLIP_PRIVATE_MAX_ATTEMPTS` | `10` | Failed joins and room creations per client IP per minute |
+
+A server restart empties the private rooms as well as the shared clipboard.
+`/config.js` exposes the private settings to the frontend so the tab and PIN
+field match the server configuration.
+
 ## Logging
 
 Logging verbosity is controlled by `RUST_LOG` (default `info`). At the default
 level the server logs every WebSocket connect/disconnect with the client IP and
-User-Agent, plus a periodic status line (every 60s, when there are clients or
-clipboard content) summarizing connected clients and how full the clipboard is.
-Individual clipboard updates are logged at `debug`, so use `RUST_LOG=debug` to
-see every change.
+User-Agent, plus a periodic status line (every 60s, when there are clients,
+clipboard content or private rooms) summarizing connected clients, how full the
+clipboard is and how many private rooms and peers are active. Individual
+clipboard updates are logged at `debug`, so use `RUST_LOG=debug` to see every
+change.
 
 ## Development
 
